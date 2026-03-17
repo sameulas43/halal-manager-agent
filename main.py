@@ -1,4 +1,4 @@
-"""
+# SENTINEL Manager v1.0.1"""
 🧠 SENTINEL — MANAGER AGENT
 Cerveau central du système.
 - Analyse intelligente via Claude Haiku (décisions importantes)
