@@ -40,7 +40,7 @@ TRADING_URL        = os.getenv("TRADING_URL", "http://localhost:5003")
 # ─── INIT ─────────────────────────────────────────────────
 app          = Flask(__name__)
 groq_client  = Groq(api_key=GROQ_API_KEY)
-claude_client = anthropic.Anthropic(api_key=ANTHROPIC_KEY) if ANTHROPIC_API_KEY else None
+claude_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
 STATE        = Path("manager_state.json")
 
 SYSTEM_PROMPT = (
