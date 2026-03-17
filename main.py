@@ -1,7 +1,8 @@
 """
 🧠 SENTINEL — MANAGER AGENT
 Cerveau central du système.
-- Analyse intelligente via Groq LLM
+- Analyse intelligente via Claude Haiku (décisions importantes)
+- Groq comme fallback (gratuit)
 - Coordonne Skills Hunter + Trading Agent
 - Rapports matin/soir/hebdo/mensuel
 - JAMAIS d'exécution sans approbation Samet ✅/❌
@@ -13,6 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from flask import Flask, request, jsonify
 from groq import Groq
+import anthropic
 
 # Import config
 import sys
@@ -23,21 +25,29 @@ except:
     pass
 
 # Lecture directe — fallback si config non chargé
-DISCORD_WEBHOOK  = os.getenv("DW_URL", os.getenv("DISCORD_WEBHOOK_URL", ""))
-GROQ_API_KEY     = os.getenv("LA", os.getenv("GROQ_API_KEY", ""))
-DISCORD_TOKEN    = os.getenv("BT", os.getenv("DISCORD_TOKEN", ""))
+DISCORD_WEBHOOK    = os.getenv("DW_URL", os.getenv("DISCORD_WEBHOOK_URL", ""))
+GROQ_API_KEY       = os.getenv("LA", os.getenv("GROQ_API_KEY", ""))
+ANTHROPIC_API_KEY  = os.getenv("ANTHROPIC_KEY", "")
+DISCORD_TOKEN      = os.getenv("BT", os.getenv("DISCORD_TOKEN", ""))
 DISCORD_CHANNEL_ID = os.getenv("BC", os.getenv("DISCORD_CHANNEL_ID", ""))
-AGENT_SECRET     = os.getenv("SS", os.getenv("SENTINEL_SECRET", "sentinel-secret-key"))
-GMAIL_ADDRESS    = os.getenv("MF", os.getenv("GMAIL_ADDRESS", ""))
-GMAIL_APP_PWD    = os.getenv("MP", os.getenv("GMAIL_APP_PASSWORD", ""))
-MANAGER_URL      = os.getenv("MANAGER_URL", "http://localhost:5001")
-SKILLS_URL       = os.getenv("SKILLS_URL", "http://localhost:5002")
-TRADING_URL      = os.getenv("TRADING_URL", "http://localhost:5003")
+AGENT_SECRET       = os.getenv("SS", os.getenv("SENTINEL_SECRET", "sentinel-secret-key"))
+GMAIL_ADDRESS      = os.getenv("MF", os.getenv("GMAIL_ADDRESS", ""))
+GMAIL_APP_PWD      = os.getenv("MP", os.getenv("GMAIL_APP_PASSWORD", ""))
+MANAGER_URL        = os.getenv("MANAGER_URL", "http://localhost:5001")
+SKILLS_URL         = os.getenv("SKILLS_URL", "http://localhost:5002")
+TRADING_URL        = os.getenv("TRADING_URL", "http://localhost:5003")
 
 # ─── INIT ─────────────────────────────────────────────────
-app    = Flask(__name__)
-groq   = Groq(api_key=GROQ_API_KEY)
-STATE  = Path("manager_state.json")
+app          = Flask(__name__)
+groq_client  = Groq(api_key=GROQ_API_KEY)
+claude_client = anthropic.Anthropic(api_key=ANTHROPIC_KEY) if ANTHROPIC_API_KEY else None
+STATE        = Path("manager_state.json")
+
+SYSTEM_PROMPT = (
+    "Tu es le Manager Agent de SENTINEL, un système d'investissement éthique. "
+    "Tu analyses les données de marché et proposes des décisions d'investissement. "
+    "Tes réponses sont concises, en français, max 3 phrases."
+)
 
 # ─── HELPERS ──────────────────────────────────────────────
 def now_str():
@@ -58,56 +68,64 @@ def save_state(s: dict):
 def log_event(msg: str):
     s = load_state()
     s["events"].append({"time": now_str(), "msg": msg})
-    s["events"] = s["events"][-50:]  # Garde les 50 derniers
+    s["events"] = s["events"][-50:]
     save_state(s)
 
-# ─── GROQ — CERVEAU ───────────────────────────────────────
-def ask_groq(prompt: str, system: str = None, fast: bool = False) -> str:
-    """Appelle Groq LLM pour analyse intelligente"""
+# ─── LLM — Claude Haiku (important) + Groq (rapide) ──────
+def ask_claude(prompt: str, system: str = None) -> str:
+    """Claude Haiku pour les décisions importantes"""
+    if not claude_client:
+        return ask_groq(prompt, system, fast=False)
     try:
-        model = GROQ_MODEL_FAST if fast else GROQ_MODEL
-        sys_msg = system or (
-            f"Tu es le Manager Agent de SENTINEL, un système d'investissement éthique. "
-            f"Tu analyses les données de marché et proposes des décisions d'investissement. "
-            f"Tes réponses sont concises, en français, max 3 phrases."
+        msg = claude_client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=300,
+            system=system or SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": prompt}]
         )
-        response = groq.chat.completions.create(
+        return msg.content[0].text.strip()
+    except Exception as e:
+        print(f"⚠️ Claude Haiku erreur : {e} → fallback Groq")
+        return ask_groq(prompt, system, fast=False)
+
+def ask_groq(prompt: str, system: str = None, fast: bool = False) -> str:
+    """Groq pour les analyses rapides et fréquentes"""
+    try:
+        model = "llama-3.1-8b-instant" if fast else "llama-3.3-70b-versatile"
+        response = groq_client.chat.completions.create(
             model=model,
             messages=[
-                {"role": "system", "content": sys_msg},
+                {"role": "system", "content": system or SYSTEM_PROMPT},
                 {"role": "user",   "content": prompt}
             ],
-            max_tokens=300,
-            temperature=0.3
+            max_tokens=300, temperature=0.3
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
         print(f"❌ Groq erreur : {e}")
-        return "Analyse indisponible (Groq offline)"
+        return "Analyse indisponible"
 
 def analyze_market(prices: dict) -> str:
-    """Analyse intelligente du marché via Groq"""
+    """Analyse marché via Claude Haiku — décision importante"""
     summary = ", ".join(
         f"{s}: {d['price']}$ ({d['change']:+.1f}%)"
         for s, d in list(prices.items())[:6]
     )
-    return ask_groq(
+    return ask_claude(
         f"Voici les prix actuels du portefeuille : {summary}. "
-        f"Donne une analyse rapide du marché aujourd'hui et un conseil d'action.",
-        fast=True
+        f"Donne une analyse rapide du marché aujourd'hui et un conseil d'action."
     )
 
 def analyze_dip(symbol: str, change: float, price: float) -> str:
-    """Analyse un dip spécifique"""
-    return ask_groq(
+    """Analyse un dip via Claude Haiku — décision financière importante"""
+    return ask_claude(
         f"{symbol} a baissé de {change:.1f}% à {price}$. "
         f"Est-ce un bon point d'entrée pour un investissement éthique long terme ? "
-        f"Donne une recommandation en 2 phrases.",
-        fast=True
+        f"Donne une recommandation claire en 2 phrases."
     )
 
 def analyze_skill(skill_title: str, skill_desc: str) -> str:
-    """Analyse si un skill trouvé est pertinent"""
+    """Analyse pertinence d'un skill via Groq — tâche répétitive"""
     return ask_groq(
         f"Un skill a été trouvé : '{skill_title}' - {skill_desc}. "
         f"Est-ce pertinent pour un bot de DCA mensuel sur ETFs éthiques ? "
