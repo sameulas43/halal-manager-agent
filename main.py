@@ -28,7 +28,7 @@ except:
 # Lecture directe — fallback si config non chargé
 DISCORD_WEBHOOK    = os.getenv("DW_URL", os.getenv("DISCORD_WEBHOOK_URL", ""))
 GROQ_API_KEY       = os.getenv("LA", os.getenv("GROQ_API_KEY", ""))
-ANTHROPIC_API_KEY  = os.getenv("ANTHROPIC_KEY", "")
+ANTHROPIC_API_KEY  = os.getenv("ANTHROPIC_KEY", "") or os.getenv("ANTHROPIC_API_KEY", "")
 DISCORD_TOKEN      = os.getenv("BT", os.getenv("DISCORD_TOKEN", ""))
 DISCORD_CHANNEL_ID = os.getenv("BC", os.getenv("DISCORD_CHANNEL_ID", ""))
 AGENT_SECRET       = os.getenv("SS", os.getenv("SENTINEL_SECRET", "sentinel-secret-key"))
